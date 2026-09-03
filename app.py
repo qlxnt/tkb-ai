@@ -27,7 +27,7 @@ def save_table_to_db(df: pd.DataFrame, table_name: str):
     df.to_sql(table_name, conn, if_exists="replace", index=False)
     conn.close()
 
-# --- BẢNG NGUYÊN TẮC THỰC TẾ (Đã bóc tách chuẩn xác từ AI) ---
+# --- BẢNG NGUYÊN TẮC THỰC TẾ ---
 DEFAULT_RULES = [
     {"Bật/Tắt": True, "Mã Nguyên Tắc": "MAX_2_TIET", "Mô tả": "Không xếp 1 môn quá 2 tiết/buổi/lớp (trừ ghép).", "Loại": "Cơ bản"},
     {"Bật/Tắt": True, "Mã Nguyên Tắc": "NO_CACH_TIET", "Mô tả": "Tránh xếp cách tiết (Tránh 1-3, 2-4, 1-4, 5-7).", "Loại": "Cơ bản"},
@@ -337,6 +337,36 @@ def styler_func(df):
         return 'background-color: white; color: black;'
     return df.style.map(color_cells) if hasattr(df.style, 'map') else df.style.applymap(color_cells)
 
+# --- HÀM HỖ TRỢ XỬ LÝ DỮ LIỆU TỪ FILE CHỈNH SỬA ---
+def parse_r2_vars_from_df(new_df_r2):
+    new_r2_vars = []
+    try: teachers_df = load_teachers_from_db()
+    except: teachers_df = pd.DataFrame()
+    
+    for _, r in new_df_r2.iterrows():
+        c = str(r.get('Lớp', '')).strip()
+        gv_str = str(r.get('Giáo viên', '')).strip()
+        d = str(r.get('Ngày', '')).strip()
+        try: p = int(r.get('Tiết', 0))
+        except: continue
+        
+        if not c or not d or p == 0: continue
+        if any(x in gv_str for x in ['⭐', '🟢']): continue
+        
+        clean_gv_str = gv_str.replace('🔴', '').replace('📌', '').strip()
+        
+        if '-' in clean_gv_str:
+            parts = clean_gv_str.split('-', 1)
+            mon = parts[0].strip()
+            gv_ho_ten = parts[1].strip()
+            new_r2_vars.append((c, mon, gv_ho_ten, d, p))
+        elif clean_gv_str == "TNHN":
+            for _, t_row in teachers_df.iterrows():
+                if str(t_row.get('lop_chu_nhiem', '')).strip() == c:
+                    new_r2_vars.append((c, "TNHN", str(t_row.get('ho_ten', '')).strip(), d, p))
+                    break
+    return new_r2_vars
+
 
 if menu == "Module 1: Giáo viên":
     st.markdown('<div class="main-title">🎯 MODULE 1: QUẢN TRỊ DỮ LIỆU GIÁO VIÊN</div>', unsafe_allow_html=True)
@@ -402,7 +432,6 @@ elif menu == "Module 2: Lớp & CSVC":
 elif menu == "Module 3: Kiểm tra Lịch":
     st.markdown('<div class="main-title">🔍 MODULE 3: KIỂM TRA LỊCH CỐ ĐỊNH & NGUYÊN TẮC</div>', unsafe_allow_html=True)
     
-    # --- CHUYỂN BẢNG NGUYÊN TẮC SANG MODULE 3 ---
     with st.expander("⚙️ BẢNG CẤU HÌNH NGUYÊN TẮC RÀNG BUỘC (RULES ENGINE)", expanded=True):
         st.info("💡 Hệ thống AI và Module kiểm tra sẽ quét tuân thủ theo các cài đặt trong bảng này. Bấm LƯU để áp dụng thiết lập mới.")
         if "rules_df" not in st.session_state:
@@ -421,8 +450,6 @@ elif menu == "Module 3: Kiểm tra Lịch":
     with st.spinner("Đang tổng hợp ma trận và kiểm tra nguyên tắc..."):
         res1 = get_fixed_schedule(active_rules)
         if res1["status"] == "SUCCESS":
-            
-            # --- HIỂN THỊ CẢNH BÁO LỖI NẾU LỊCH CỐ ĐỊNH VI PHẠM NGUYÊN TẮC ---
             if res1.get("warnings"):
                 st.markdown("#### ⚠️ PHÁT HIỆN LỖI XUNG ĐỘT TRONG LỊCH CỐ ĐỊNH:")
                 for w in res1["warnings"]:
@@ -457,7 +484,6 @@ elif menu == "Module 3: Kiểm tra Lịch":
 elif menu == "Module 4: AI Lấp Đầy":
     st.markdown('<div class="main-title">🧠 MODULE 4: AI LẤP ĐẦY THỜI KHÓA BIỂU</div>', unsafe_allow_html=True)
     
-    # Load ngầm active_rules để chạy Thuật toán
     active_rules = {row['Mã Nguyên Tắc']: row['Bật/Tắt'] for _, row in load_rules_from_db().iterrows()}
 
     st.markdown("### 📌 VÒNG 1: KHỞI TẠO KHUNG CỐ ĐỊNH")
@@ -493,7 +519,7 @@ elif menu == "Module 4: AI Lấp Đầy":
 
     if "tkb_round2" in st.session_state:
         st.markdown("#### 📝 CHỈNH SỬA MA TRẬN TKB SÁNG & CHIỀU (VÒNG 2):")
-        st.info("💡 Bạn có thể trực tiếp chỉnh sửa các ô trong ma trận TKB dưới đây, sau đó bấm nút LƯU MA TRẬN để cập nhật lại dữ liệu cho Vòng 3.")
+        st.info("💡 CÁCH 1: Bạn có thể trực tiếp chỉnh sửa các ô trống trong lưới TKB dưới đây, sau đó bấm nút LƯU MA TRẬN để cập nhật lại dữ liệu cho Vòng 3.")
         
         df_tkb2 = st.session_state.tkb_round2.copy()
         df_tkb2['Ngày'] = pd.Categorical(df_tkb2['Ngày'], categories=["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"], ordered=True)
@@ -514,7 +540,7 @@ elif menu == "Module 4: AI Lấp Đầy":
         with tab_ec2:
             edited_chieu_flat = st.data_editor(pt_chieu_editable, use_container_width=True, height=400, key="edit_chieu_flat_v2")
             
-        if st.button("💾 LƯU MA TRẬN CHỈNH SỬA", type="primary"):
+        if st.button("💾 LƯU MA TRẬN CHỈNH SỬA (SỬA TRỰC TIẾP TRÊN WEB)", type="primary"):
             new_rows = []
             def unpivot_flat(flat_df):
                 for _, row in flat_df.iterrows():
@@ -523,7 +549,7 @@ elif menu == "Module 4: AI Lấp Đầy":
                     for col in flat_df.columns:
                         if col not in ['Ngày', 'Tiết']:
                             val = str(row[col]).strip()
-                            if val:
+                            if val and val != 'nan':
                                 new_rows.append({"Lớp": col, "Giáo viên": val, "Ngày": d, "Tiết": p})
                                 
             unpivot_flat(edited_sang_flat)
@@ -531,44 +557,54 @@ elif menu == "Module 4: AI Lấp Đầy":
             
             new_df_r2 = pd.DataFrame(new_rows)
             st.session_state.tkb_round2 = new_df_r2
-            
-            new_r2_vars = []
-            
-            for _, r in new_df_r2.iterrows():
-                c = r['Lớp']
-                gv_str = str(r['Giáo viên'])
-                d = r['Ngày']
-                p = int(r['Tiết'])
-                
-                if any(x in gv_str for x in ['⭐', '🟢']): continue
-                
-                clean_gv_str = gv_str.replace('🔴', '').replace('📌', '').strip()
-                
-                if '-' in clean_gv_str:
-                    parts = clean_gv_str.split('-', 1)
-                    mon = parts[0].strip()
-                    gv_ho_ten = parts[1].strip()
-                    new_r2_vars.append((c, mon, gv_ho_ten, d, p))
-                elif clean_gv_str == "TNHN":
-                    teachers_df = load_teachers_from_db()
-                    for _, t_row in teachers_df.iterrows():
-                        if str(t_row.get('lop_chu_nhiem', '')).strip() == c:
-                            new_r2_vars.append((c, "TNHN", str(t_row.get('ho_ten', '')).strip(), d, p))
-                            break
-                            
-            st.session_state.r2_vars = new_r2_vars
-            st.success("✅ Đã lưu ma trận chỉnh sửa thành công! Hệ thống đã ghi nhận tên chuẩn xác.")
+            st.session_state.r2_vars = parse_r2_vars_from_df(new_df_r2)
+            st.success("✅ Đã lưu ma trận chỉnh sửa thành công! Bạn có thể kéo xuống bấm CHẠY VÒNG 3 để kiểm tra lỗi.")
 
         st.markdown("---")
-        excel_bytes_m2 = generate_styled_excel_both_shifts(df_sang2, df_chieu2, st.session_state.tkb_round2)
-        st.download_button(
-            label="📥 TẢI BẢN SAO LƯU EXCEL TKB (Kết Quả Vòng 2)",
-            data=excel_bytes_m2,
-            file_name="TKB_KetQua_Vong2.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="secondary",
-            use_container_width=True
-        )
+        st.info("💡 CÁCH 2: Tải file Excel ở nút bên dưới về. Chỉnh sửa tùy ý trên máy tính (bằng phần mềm Excel), sau đó upload ngược file vừa sửa vào ô bên cạnh để hệ thống đồng bộ!")
+        
+        col_down, col_up = st.columns([1, 1])
+        with col_down:
+            excel_bytes_m2 = generate_styled_excel_both_shifts(df_sang2, df_chieu2, st.session_state.tkb_round2)
+            st.download_button(
+                label="📥 BƯỚC 1: TẢI BẢN SAO LƯU EXCEL TKB (Để sửa tay)",
+                data=excel_bytes_m2,
+                file_name="TKB_KetQua_Vong2.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="secondary",
+                use_container_width=True
+            )
+            
+        with col_up:
+            uploaded_tkb = st.file_uploader("📤 BƯỚC 2: NẠP LẠI FILE EXCEL ĐÃ SỬA TAY", type=["xlsx"], label_visibility="collapsed")
+            if uploaded_tkb is not None:
+                if st.button("🔄 Cập nhật dữ liệu từ file Excel (Đã sửa)", type="primary", use_container_width=True):
+                    try:
+                        xls = pd.ExcelFile(uploaded_tkb)
+                        all_rows = []
+                        for sheet in ["TKB Sáng", "TKB Chiều"]:
+                            if sheet in xls.sheet_names:
+                                df_sheet = pd.read_excel(xls, sheet_name=sheet)
+                                if 'Ngày' in df_sheet.columns:
+                                    df_sheet['Ngày'] = df_sheet['Ngày'].ffill() 
+                                    for _, row in df_sheet.iterrows():
+                                        d = row['Ngày']
+                                        p = row['Tiết']
+                                        for col in df_sheet.columns:
+                                            if col not in ['Ngày', 'Tiết'] and not str(col).startswith('Unnamed'):
+                                                val = str(row[col]).strip()
+                                                if val and val != 'nan':
+                                                    all_rows.append({"Lớp": col, "Giáo viên": val, "Ngày": d, "Tiết": p})
+                        if all_rows:
+                            new_df_r2 = pd.DataFrame(all_rows)
+                            st.session_state.tkb_round2 = new_df_r2
+                            st.session_state.r2_vars = parse_r2_vars_from_df(new_df_r2)
+                            st.success("✅ Đã cập nhật ma trận từ file Excel thành công! Vui lòng bấm CHẠY VÒNG 3 ở bên dưới để kiểm tra lỗi và xuất bản.")
+                            st.rerun()
+                        else:
+                            st.error("❌ Không tìm thấy dữ liệu hợp lệ. Đảm bảo file giữ nguyên sheet 'TKB Sáng' và 'TKB Chiều'.")
+                    except Exception as e:
+                        st.error(f"❌ Lỗi đọc file Excel: {e}")
 
         st.markdown("---")
         st.markdown("### 🏆 VÒNG 3: KIỂM TRA ĐỦ TIẾT & CHỐNG ĐÂM ĐỤNG")
