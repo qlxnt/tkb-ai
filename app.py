@@ -27,20 +27,15 @@ def save_table_to_db(df: pd.DataFrame, table_name: str):
     df.to_sql(table_name, conn, if_exists="replace", index=False)
     conn.close()
 
-# --- QUẢN LÝ DATABASE BẢNG NGUYÊN TẮC ---
+# --- BẢNG NGUYÊN TẮC THỰC TẾ (Đã bóc tách chuẩn xác từ AI) ---
 DEFAULT_RULES = [
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MAX_2_TIET", "Mô tả": "Không xếp 1 môn quá 2 tiết/buổi/lớp (trừ ngoại vi/ghép).", "Loại": "Bắt buộc"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "NO_CACH_TIET", "Mô tả": "Tránh xếp cách tiết (Tránh 1-3, 2-4, 1-4, 5-7) cùng môn.", "Loại": "Bắt buộc"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "LIMIT_MON_CHINH", "Mô tả": "Toán, Văn <= 3 tiết/ngày; T.Anh <= 2 tiết/ngày.", "Loại": "Bắt buộc"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "BLOCK_MON_CHINH", "Mô tả": "Toán, Văn, Anh tối thiểu 2 tiết/buổi (tránh xếp lẻ 1 tiết).", "Loại": "Khuyến khích"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "BLOCK_THE_DUC", "Mô tả": "Thể dục xếp 2 tiết liên tục (1-2, 3-4, 5-6).", "Loại": "Bắt buộc"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MIN_2_TIET_GV", "Mô tả": "GV dạy tối thiểu 2 tiết/buổi, tránh khe hở tiết 1+4 sáng.", "Loại": "Khuyến khích"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MAX_2_BUOI_2_TIET", "Mô tả": "GV không có quá 02 buổi/tuần mà chỉ dạy đúng 2 tiết.", "Loại": "Khuyến khích"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MAX_4_GV_TIN", "Mô tả": "Môn Tin học tối đa 4 GV dạy trong cùng một buổi.", "Loại": "Bắt buộc"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "NGHI_1_NGAY", "Mô tả": "Đảm bảo mỗi giáo viên có ít nhất 1 ngày nghỉ trọn vẹn/tuần.", "Loại": "Bắt buộc"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "TEACHER_PREFS", "Mô tả": "Áp dụng các ngày nghỉ theo tổ bộ môn và quyền lợi cá nhân.", "Loại": "Bắt buộc"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MAX_3_TIET_GV", "Mô tả": "GV không dạy quá 3 tiết/buổi/lớp (4 tiết nếu có TNHN).", "Loại": "Bắt buộc"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "KIN_B_SANG", "Mô tả": "Ưu tiên xếp kín tiết 1,2,3,4 sáng cho tất cả các lớp.", "Loại": "Khuyến khích"}
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MAX_2_TIET", "Mô tả": "Không xếp 1 môn quá 2 tiết/buổi/lớp (trừ ghép).", "Loại": "Cơ bản"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "NO_CACH_TIET", "Mô tả": "Tránh xếp cách tiết (Tránh 1-3, 2-4, 1-4, 5-7).", "Loại": "Cơ bản"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "TEACHER_PREFS", "Mô tả": "Áp dụng ngày nghỉ cá nhân và nghỉ theo Tổ bộ môn.", "Loại": "Cơ bản"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "BLOCK_MON_CHINH", "Mô tả": "Các môn cốt lõi (Toán, Văn, Anh...) ép xếp liền 2 tiết.", "Loại": "Nâng cao"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MIN_2_TIET_GV", "Mô tả": "Tối ưu lịch GV: Tránh 1 buổi chỉ dạy đúng 1 tiết.", "Loại": "Nâng cao"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "NO_AFTERNOON_GAP", "Mô tả": "Chống thủng lỗ tiết 6 buổi chiều (mô hình 1-0-1).", "Loại": "Nâng cao"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "KIN_B_SANG", "Mô tả": "Ép thuật toán ưu tiên lấp kín toàn bộ buổi sáng.", "Loại": "Nâng cao"}
 ]
 
 def load_rules_from_db():
@@ -61,7 +56,7 @@ def save_rules_to_db_persist(df):
     conn.close()
 
 # ==============================================================
-# HÀM XUẤT EXCEL CHUẨN: XUẤT TOÀN BỘ TKB TRƯỜNG
+# HÀM XUẤT EXCEL TKB
 # ==============================================================
 def generate_styled_excel_both_shifts(df_sang, df_chieu, df_raw):
     try:
@@ -186,9 +181,6 @@ def generate_styled_excel_both_shifts(df_sang, df_chieu, df_raw):
     return output.getvalue()
 
 
-# ==============================================================
-# HÀM MỚI: XUẤT EXCEL CHUẨN TÙY CHỈNH CHO 1 LỚP HOẶC 1 GIÁO VIÊN
-# ==============================================================
 def generate_single_styled_excel(df_pivot, entity_name, entity_type="Lớp"):
     try:
         from openpyxl import Workbook
@@ -204,7 +196,6 @@ def generate_single_styled_excel(df_pivot, entity_name, entity_type="Lớp"):
     ws = wb.active
     ws.title = f"TKB {entity_name}"
 
-    # Định nghĩa Styles
     font_bold = Font(bold=True)
     font_title = Font(bold=True, size=14, color="1E3A8A")
     align_center = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -216,13 +207,11 @@ def generate_single_styled_excel(df_pivot, entity_name, entity_type="Lớp"):
     fill_do = PatternFill(start_color="FCA5A5", end_color="FCA5A5", fill_type="solid")
     fill_xanh = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
     
-    # Kẻ Tiêu đề bảng
     ws.merge_cells('A1:F1')
     ws['A1'] = f"THỜI KHÓA BIỂU {entity_type.upper()}: {entity_name}"
     ws['A1'].font = font_title
     ws['A1'].alignment = align_center
 
-    # Kẻ Headers (Ngày trong tuần)
     headers = ["Tiết"] + list(df_pivot.columns)
     for col_idx, h in enumerate(headers, 1):
         cell = ws.cell(row=3, column=col_idx, value=h)
@@ -231,12 +220,10 @@ def generate_single_styled_excel(df_pivot, entity_name, entity_type="Lớp"):
         cell.alignment = align_center
         cell.border = border_thin
     
-    # Căn chỉnh kích thước cột
     ws.column_dimensions['A'].width = 8
     for col_idx in range(2, len(headers) + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = 22
 
-    # Đổ Data vào khung
     row_idx = 4
     for tiet, row in df_pivot.iterrows():
         c = ws.cell(row=row_idx, column=1, value=tiet)
@@ -250,7 +237,6 @@ def generate_single_styled_excel(df_pivot, entity_name, entity_type="Lớp"):
             c.alignment = align_center
             c.border = border_thin
             
-            # Tô màu nhận diện
             if "TNHN" in val:
                 c.fill = fill_tnhn
                 c.font = Font(color="1E40AF", bold=True)
@@ -293,11 +279,9 @@ if st.sidebar.button("🗑️ Xóa sạch Dữ liệu (Reset)"):
     for key in list(st.session_state.keys()): del st.session_state[key]
     st.rerun()
 
-# --- CẬP NHẬT: TÍNH NĂNG QUẢN LÝ DỮ LIỆU (BACKUP/RESTORE) ---
 st.sidebar.markdown("### 💾 QUẢN LÝ DỮ LIỆU (CLOUD)")
 st.sidebar.info("Sử dụng tính năng này để tránh mất dữ liệu khi máy chủ Cloud khởi động lại.")
 
-# 1. Tải Backup DB về máy
 if os.path.exists(DB_PATH):
     with open(DB_PATH, "rb") as f:
         st.sidebar.download_button(
@@ -308,7 +292,6 @@ if os.path.exists(DB_PATH):
             use_container_width=True
         )
 
-# 2. Phục hồi DB từ máy lên Cloud
 uploaded_db = st.sidebar.file_uploader("📤 Phục hồi DB từ máy", type=["db"])
 if uploaded_db is not None:
     if st.sidebar.button("Tiến hành Phục hồi", type="primary", use_container_width=True):
@@ -354,6 +337,7 @@ def styler_func(df):
         return 'background-color: white; color: black;'
     return df.style.map(color_cells) if hasattr(df.style, 'map') else df.style.applymap(color_cells)
 
+
 if menu == "Module 1: Giáo viên":
     st.markdown('<div class="main-title">🎯 MODULE 1: QUẢN TRỊ DỮ LIỆU GIÁO VIÊN</div>', unsafe_allow_html=True)
     if "teachers_df" not in st.session_state: st.session_state.teachers_df = load_teachers_from_db()
@@ -371,7 +355,6 @@ if menu == "Module 1: Giáo viên":
 
     if not st.session_state.teachers_df.empty:
         tab_gv, tab_lop = st.tabs(["👩‍🏫 Danh sách Giáo Viên", "📋 Tổng Tiết Các Lớp"])
-        
         with tab_gv:
             t_col1, _, t_col3 = st.columns([3, 4, 3])
             with t_col1: selected_to = st.selectbox("Lọc Tổ:", ["Tất cả"] + sorted(list(st.session_state.teachers_df["to_bo_mon"].dropna().unique())))
@@ -417,12 +400,34 @@ elif menu == "Module 2: Lớp & CSVC":
         if st.button("💾 LƯU KHUNG GIỜ", type="primary"): save_table_to_db(edited_pinned, "pinned_slots")
 
 elif menu == "Module 3: Kiểm tra Lịch":
-    st.markdown('<div class="main-title">🔍 MODULE 3: KIỂM TRA LỊCH CỐ ĐỊNH</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title">🔍 MODULE 3: KIỂM TRA LỊCH CỐ ĐỊNH & NGUYÊN TẮC</div>', unsafe_allow_html=True)
     
-    from src.modules.m3_validator.checker import get_fixed_schedule
-    with st.spinner("Đang tổng hợp ma trận..."):
-        res1 = get_fixed_schedule()
+    # --- CHUYỂN BẢNG NGUYÊN TẮC SANG MODULE 3 ---
+    with st.expander("⚙️ BẢNG CẤU HÌNH NGUYÊN TẮC RÀNG BUỘC (RULES ENGINE)", expanded=True):
+        st.info("💡 Hệ thống AI và Module kiểm tra sẽ quét tuân thủ theo các cài đặt trong bảng này. Bấm LƯU để áp dụng thiết lập mới.")
+        if "rules_df" not in st.session_state:
+            st.session_state.rules_df = load_rules_from_db()
+            
+        edited_rules = st.data_editor(st.session_state.rules_df, num_rows="dynamic", use_container_width=True, hide_index=True)
+        st.session_state.rules_df = edited_rules
+        
+        if st.button("💾 LƯU BẢNG NGUYÊN TẮC", type="secondary"):
+            save_rules_to_db_persist(edited_rules)
+            st.success("Đã lưu bảng nguyên tắc vào hệ thống Database!")
+            st.rerun()
+            
+        active_rules = {row['Mã Nguyên Tắc']: row['Bật/Tắt'] for _, row in edited_rules.iterrows()}
+
+    with st.spinner("Đang tổng hợp ma trận và kiểm tra nguyên tắc..."):
+        res1 = get_fixed_schedule(active_rules)
         if res1["status"] == "SUCCESS":
+            
+            # --- HIỂN THỊ CẢNH BÁO LỖI NẾU LỊCH CỐ ĐỊNH VI PHẠM NGUYÊN TẮC ---
+            if res1.get("warnings"):
+                st.markdown("#### ⚠️ PHÁT HIỆN LỖI XUNG ĐỘT TRONG LỊCH CỐ ĐỊNH:")
+                for w in res1["warnings"]:
+                    st.warning(w)
+            
             if "message" in res1 and res1["message"]:
                 st.info(res1["message"])
                 
@@ -452,20 +457,8 @@ elif menu == "Module 3: Kiểm tra Lịch":
 elif menu == "Module 4: AI Lấp Đầy":
     st.markdown('<div class="main-title">🧠 MODULE 4: AI LẤP ĐẦY THỜI KHÓA BIỂU</div>', unsafe_allow_html=True)
     
-    with st.expander("⚙️ BẢNG CẤU HÌNH NGUYÊN TẮC RÀNG BUỘC (RULES ENGINE)", expanded=True):
-        st.info("💡 Hệ thống AI sẽ tôn trọng các cài đặt trong bảng này. Bấm LƯU trước khi CHẠY VÒNG 1 để áp dụng thiết lập mới.")
-        
-        if "rules_df" not in st.session_state:
-            st.session_state.rules_df = load_rules_from_db()
-            
-        edited_rules = st.data_editor(st.session_state.rules_df, num_rows="dynamic", use_container_width=True, hide_index=True)
-        st.session_state.rules_df = edited_rules
-        
-        if st.button("💾 LƯU BẢNG NGUYÊN TẮC", type="secondary"):
-            save_rules_to_db_persist(edited_rules)
-            st.success("Đã lưu bảng nguyên tắc vào hệ thống Database!")
-        
-        active_rules = {row['Mã Nguyên Tắc']: row['Bật/Tắt'] for _, row in edited_rules.iterrows()}
+    # Load ngầm active_rules để chạy Thuật toán
+    active_rules = {row['Mã Nguyên Tắc']: row['Bật/Tắt'] for _, row in load_rules_from_db().iterrows()}
 
     st.markdown("### 📌 VÒNG 1: KHỞI TẠO KHUNG CỐ ĐỊNH")
     if st.button("🚀 CHẠY VÒNG 1: KHỞI TẠO KHUNG CỐ ĐỊNH", type="primary", use_container_width=True):

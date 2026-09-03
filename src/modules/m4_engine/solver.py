@@ -7,9 +7,6 @@ from ortools.sat.python import cp_model
 DB_PATH = os.path.join("data", "database", "tkb_data.db")
 
 def load_data():
-    """
-    Đọc dữ liệu trực tiếp từ bảng `teachers` (ds_lop_day, lop_chu_nhiem, ma_gv) và `pinned_slots`.
-    """
     conn = sqlite3.connect(DB_PATH)
     try:
         cursor = conn.cursor()
@@ -61,7 +58,6 @@ def get_valid_pairs_and_mapping(teachers_raw):
                 m = re.search(r'^(.*?)\s+((?:10|11|12)A\d+)\s*\((\d+)[tT]\)$', item)
                 if m:
                     raw_mon = m.group(1).strip()
-                    
                     if ' - ' in raw_mon:
                         raw_mon = raw_mon.split(' - ')[0].strip()
                     elif '-' in raw_mon and ('TNHN' in raw_mon or 'CH ĐỀ' in raw_mon):
@@ -69,8 +65,8 @@ def get_valid_pairs_and_mapping(teachers_raw):
 
                     lop = m.group(2).strip().upper()
                     so_tiet = int(m.group(3))
-                    
                     mon = std_sub(raw_mon)
+                    
                     if is_valid_class(lop) and mon:
                         if (lop, mon, gv_code) not in subject_periods:
                             subject_periods[(lop, mon, gv_code)] = 0
@@ -79,15 +75,12 @@ def get_valid_pairs_and_mapping(teachers_raw):
 
     classes = list(set([k[0] for k in mapping.keys()]))
     class_subjects = {c: [] for c in classes} 
-    
     teacher_codes = list(set([k[2] for k in mapping.keys()]))
     teacher_subjects = {t: [] for t in teacher_codes}
     
     for (c, mon, gv) in mapping.keys():
-        if (mon, gv) not in class_subjects[c]: 
-            class_subjects[c].append((mon, gv))
-        if (c, mon) not in teacher_subjects[gv]: 
-            teacher_subjects[gv].append((c, mon))
+        if (mon, gv) not in class_subjects[c]: class_subjects[c].append((mon, gv))
+        if (c, mon) not in teacher_subjects[gv]: teacher_subjects[gv].append((c, mon))
         
     return mapping, classes, class_subjects, teacher_subjects, subject_periods
 
@@ -98,7 +91,6 @@ def parse_teacher_prefs(teachers_raw):
         'max_sessions_per_week': {}, 'must_teach_session': {}
     }
     if teachers_raw.empty: return prefs
-    
     for _, row in teachers_raw.iterrows():
         t = str(row.get('ma_gv', '')).strip()
         if not t or t == 'nan': continue
@@ -112,13 +104,9 @@ def parse_teacher_prefs(teachers_raw):
             prefs['session_off'][t] = []
             prefs['forbidden_periods'][t] = []
         
-        if ("toán" in mon_chinh or "toán" in to_bm) and "lợi" not in ho_ten:
-            prefs['days_off'][t].append("Thứ Ba")
-        if "tin" in mon_chinh or "tin" in to_bm:
-            prefs['days_off'][t].append("Thứ Ba")
-        if "văn" in mon_chinh or "văn" in to_bm:
-            prefs['days_off'][t].append("Thứ Tư")
-            
+        if ("toán" in mon_chinh or "toán" in to_bm) and "lợi" not in ho_ten: prefs['days_off'][t].append("Thứ Ba")
+        if "tin" in mon_chinh or "tin" in to_bm: prefs['days_off'][t].append("Thứ Ba")
+        if "văn" in mon_chinh or "văn" in to_bm: prefs['days_off'][t].append("Thứ Tư")
     return prefs
 
 def get_teacher_days_off(teachers_raw):
@@ -183,24 +171,14 @@ def get_pinned_count(c, mon, gv, pinned_dict):
 
 def format_display_name(subject, teacher_code):
     if not teacher_code: return f"{subject}-Trống"
-    
     if 'TNHN' in subject or 'CH ĐỀ' in subject:
         return f"{subject} - {teacher_code}"
-        
     clean_code = str(teacher_code).split('-')[-1].strip() if '-' in str(teacher_code) else str(teacher_code).strip()
     return f"{subject}-{clean_code}"
 
 def cleanup_display_name(val):
-    """
-    HÀM DỌN DẸP CHO VÒNG 3:
-    Cắt bỏ phần số và chuẩn hóa dấu phân cách cho các môn TNHN 2/3, CH ĐỀ 1/2/3.
-    Ví dụ: TNHN 2 - KTPL-Duy -> TNHN-KTPL-Duy
-           CH ĐỀ 1 - Toán-Yến -> CH ĐỀ-Toán-Yến
-    """
     val_str = str(val)
     prefix = ""
-    
-    # Giữ lại các icon trạng thái
     if val_str.startswith('🔴 '):
         prefix = "🔴 "
         val_str = val_str[2:].strip()
@@ -211,10 +189,8 @@ def cleanup_display_name(val):
         prefix = "🟢 "
         val_str = val_str[2:].strip()
         
-    # Áp dụng biểu thức chính quy (regex) để nhận diện và thu gọn tên
     val_str = re.sub(r'^TNHN\s+[23]\s*-\s*', 'TNHN-', val_str)
     val_str = re.sub(r'^CH ĐỀ\s+[123]\s*-\s*', 'CH ĐỀ-', val_str)
-        
     return prefix + val_str
 
 def generate_df_from_vars(classes, days, periods, pinned_dict, class_subjects, X, solver, days_off):
@@ -318,7 +294,8 @@ def apply_safe_core_constraints(model, classes, days, periods, class_subjects, t
                             if not (pin1 and pin2):
                                 model.Add(X[(c, mon, gv, d, p1)] + X[(c, mon, gv, d, p2)] <= 1)
 
-def apply_morning_session_absolute_fill(model, X, classes, days, class_subjects, pinned_dict, objective_terms):
+def apply_morning_session_absolute_fill(model, X, classes, days, class_subjects, pinned_dict, objective_terms, rules):
+    if not rules.get("KIN_B_SANG", True): return
     morning_periods = [1, 2, 3, 4]
     for c in classes:
         for d in days:
@@ -330,7 +307,8 @@ def apply_morning_session_absolute_fill(model, X, classes, days, class_subjects,
                 model.Add(sum(c_vars) + c_pinned + slack_m == 1)
                 objective_terms.append(slack_m * -100000)
 
-def apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pinned_dict, objective_terms):
+def apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pinned_dict, objective_terms, rules):
+    if not rules.get("NO_AFTERNOON_GAP", True): return
     for c in classes:
         for d in days:
             y_vars = {}
@@ -343,7 +321,8 @@ def apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pin
             model.Add(gap_var >= y_vars[5] + y_vars[7] - y_vars[6] - 1)
             objective_terms.append(gap_var * -50000)
 
-def apply_teacher_session_optimization(model, X, days, teacher_subjects, teacher_codes, pinned_dict, objective_terms):
+def apply_teacher_session_optimization(model, X, days, teacher_subjects, teacher_codes, pinned_dict, objective_terms, rules):
+    if not rules.get("MIN_2_TIET_GV", True): return
     for t in teacher_codes:
         for d in days:
             for session_periods in [[1, 2, 3, 4], [5, 6, 7]]:
@@ -366,7 +345,8 @@ def apply_teacher_session_optimization(model, X, days, teacher_subjects, teacher
                 
                 objective_terms.append(b_1 * -2000)
 
-def apply_core_double_period_logic(model, X, classes, days, class_subjects, subject_periods, pinned_dict, objective_terms):
+def apply_core_double_period_logic(model, X, classes, days, class_subjects, subject_periods, pinned_dict, objective_terms, rules):
+    if not rules.get("BLOCK_MON_CHINH", True): return
     hard_core = ["toán", "văn", "anh", "thể dục"]
     soft_core = ["lí", "sinh", "hoá", "hóa"]
     
@@ -401,18 +381,10 @@ def apply_core_double_period_logic(model, X, classes, days, class_subjects, subj
                         slack_pair = model.NewBoolVar(f'slack_core_pair_{c}_{mon}_{gv}')
                         model.Add(sum(pairs_vars) + slack_pair * 10 >= max(0, 1 - pinned_pairs))
                         
-                        if is_hard:
-                            objective_terms.append(slack_pair * -50000)
+                        if is_hard: objective_terms.append(slack_pair * -50000)
                         else:
                             objective_terms.append(slack_pair * -1000)
-                            for bv in pairs_vars:
-                                objective_terms.append(bv * 5000)
-
-def get_subj_weight(mon):
-    m = mon.lower()
-    if any(x in m for x in ["toán", "văn", "anh"]): return 50
-    if any(x in m for x in ["lí", "hoá", "hóa", "sinh", "thể dục"]): return 40
-    return 10
+                            for bv in pairs_vars: objective_terms.append(bv * 5000)
 
 X = {}
 
@@ -438,8 +410,7 @@ def run_round_1(rules=None):
     for c in classes:
         for (mon, gv) in class_subjects.get(c, []):
             for d in days:
-                if d in days_off.get(gv, []):
-                    continue
+                if d in days_off.get(gv, []): continue
                 for p in periods:
                     X[(c, mon, gv, d, p)] = model.NewBoolVar(f'X_{c}_{mon}_{gv}_{d}_{p}')
 
@@ -450,16 +421,11 @@ def run_round_1(rules=None):
         for (mon, gv) in class_subjects.get(c, []):
             std_p = subject_periods.get((c, mon, gv), 2)
             pinned_p = get_pinned_count(c, mon, gv, pinned_dict)
-            
-            if any(core in mon.lower() for core in core_subjects_r1):
-                target_X = max(0, std_p - pinned_p)
-            else:
-                target_X = 0 
-            
+            target_X = max(0, std_p - pinned_p) if any(core in mon.lower() for core in core_subjects_r1) else 0 
             model.Add(sum(X[(c, mon, gv, d, p)] for d in days for p in periods if (c, mon, gv, d, p) in X) == target_X)
             
-    apply_core_double_period_logic(model, X, classes, days, class_subjects, subject_periods, pinned_dict, objective_terms)
-    apply_morning_session_absolute_fill(model, X, classes, days, class_subjects, pinned_dict, objective_terms)
+    apply_core_double_period_logic(model, X, classes, days, class_subjects, subject_periods, pinned_dict, objective_terms, rules)
+    apply_morning_session_absolute_fill(model, X, classes, days, class_subjects, pinned_dict, objective_terms, rules)
 
     model.Maximize(sum(objective_terms))
     solver = cp_model.CpSolver()
@@ -468,11 +434,7 @@ def run_round_1(rules=None):
     status = solver.Solve(model)
     
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-        r1_vars = []
-        for (c, mon, gv, d, p), var in X.items():
-            if solver.Value(var) == 1:
-                r1_vars.append((c, mon, gv, d, p))
-                            
+        r1_vars = [(c, mon, gv, d, p) for (c, mon, gv, d, p), var in X.items() if solver.Value(var) == 1]
         df_result = generate_df_from_vars(classes, days, periods, pinned_dict, class_subjects, X, solver, days_off)
         return {"status": "SUCCESS", "data": df_result, "r1_vars": r1_vars}
         
@@ -480,6 +442,7 @@ def run_round_1(rules=None):
 
 def run_round_2(r1_vars, rules=None):
     global X
+    rules = rules or {}
     teachers_raw, pinned_df = load_data()
     mapping, classes, class_subjects, teacher_subjects, subject_periods = get_valid_pairs_and_mapping(teachers_raw)
     pinned_dict, classes = build_pinned_dict(pinned_df, classes, teachers_raw)
@@ -494,31 +457,24 @@ def run_round_2(r1_vars, rules=None):
     for c in classes:
         for (mon, gv) in class_subjects.get(c, []):
             for d in days:
-                if d in days_off.get(gv, []):
-                    continue
+                if d in days_off.get(gv, []): continue
                 for p in periods:
                     X[(c, mon, gv, d, p)] = model.NewBoolVar(f'X_{c}_{mon}_{gv}_{d}_{p}')
 
     objective_terms = []
     apply_safe_core_constraints(model, classes, days, periods, class_subjects, teacher_subjects, teacher_codes, pinned_dict, teachers_raw, objective_terms, is_round_3=False, rules=rules)
-    apply_morning_session_absolute_fill(model, X, classes, days, class_subjects, pinned_dict, objective_terms)
-    
-    apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pinned_dict, objective_terms)
-    apply_teacher_session_optimization(model, X, days, teacher_subjects, teacher_codes, pinned_dict, objective_terms)
+    apply_morning_session_absolute_fill(model, X, classes, days, class_subjects, pinned_dict, objective_terms, rules)
+    apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pinned_dict, objective_terms, rules)
+    apply_teacher_session_optimization(model, X, days, teacher_subjects, teacher_codes, pinned_dict, objective_terms, rules)
 
     for c in classes:
         for (mon, gv) in class_subjects.get(c, []):
             std_p = subject_periods.get((c, mon, gv), 2)
             pinned_p = get_pinned_count(c, mon, gv, pinned_dict)
-            
-            if str(mon).strip().upper() == "TNHN":
-                target_X = 0
-            else:
-                target_X = max(0, std_p - pinned_p)
-                
+            target_X = 0 if str(mon).strip().upper() == "TNHN" else max(0, std_p - pinned_p)
             model.Add(sum(X[(c, mon, gv, d, p)] for d in days for p in periods if (c, mon, gv, d, p) in X) == target_X)
             
-    apply_core_double_period_logic(model, X, classes, days, class_subjects, subject_periods, pinned_dict, objective_terms)
+    apply_core_double_period_logic(model, X, classes, days, class_subjects, subject_periods, pinned_dict, objective_terms, rules)
 
     r1_set = set(r1_vars)
     r1_bonus = []
@@ -536,11 +492,7 @@ def run_round_2(r1_vars, rules=None):
     status = solver.Solve(model)
     
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-        all_vars = []
-        for (c, mon, gv, d, p), var in X.items():
-            if solver.Value(var) == 1:
-                all_vars.append((c, mon, gv, d, p))
-                            
+        all_vars = [(c, mon, gv, d, p) for (c, mon, gv, d, p), var in X.items() if solver.Value(var) == 1]
         df_result = generate_df_from_vars(classes, days, periods, pinned_dict, class_subjects, X, solver, days_off)
         return {"status": "SUCCESS", "data": df_result, "r2_vars": all_vars}
         
@@ -548,6 +500,7 @@ def run_round_2(r1_vars, rules=None):
 
 def run_round_3(r2_vars, rules=None):
     global X
+    rules = rules or {}
     teachers_raw, pinned_df = load_data()
     mapping, classes, class_subjects, teacher_subjects, subject_periods = get_valid_pairs_and_mapping(teachers_raw)
     pinned_dict, classes = build_pinned_dict(pinned_df, classes, teachers_raw)
@@ -563,26 +516,23 @@ def run_round_3(r2_vars, rules=None):
     for c in classes:
         for (mon, gv) in class_subjects.get(c, []):
             for d in days:
-                if d in days_off.get(gv, []):
-                    continue
+                if d in days_off.get(gv, []): continue
                 for p in periods:
                     X[(c, mon, gv, d, p)] = model.NewBoolVar(f'X_{c}_{mon}_{gv}_{d}_{p}')
 
     objective_terms = []
     apply_safe_core_constraints(model, classes, days, periods, class_subjects, teacher_subjects, teacher_codes, pinned_dict, teachers_raw, objective_terms, is_round_3=True, rules=rules)
-    apply_morning_session_absolute_fill(model, X, classes, days, class_subjects, pinned_dict, objective_terms)
-    
-    apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pinned_dict, objective_terms)
-    apply_teacher_session_optimization(model, X, days, teacher_subjects, teacher_codes, pinned_dict, objective_terms)
+    apply_morning_session_absolute_fill(model, X, classes, days, class_subjects, pinned_dict, objective_terms, rules)
+    apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pinned_dict, objective_terms, rules)
+    apply_teacher_session_optimization(model, X, days, teacher_subjects, teacher_codes, pinned_dict, objective_terms, rules)
     
     for c in classes:
         for (mon, gv) in class_subjects.get(c, []):
             std_p = subject_periods.get((c, mon, gv), 2)
             pinned_p = get_pinned_count(c, mon, gv, pinned_dict)
-            target = max(0, std_p - pinned_p)
-            model.Add(sum(X[(c, mon, gv, d, p)] for d in days for p in periods if (c, mon, gv, d, p) in X) == target)
+            model.Add(sum(X[(c, mon, gv, d, p)] for d in days for p in periods if (c, mon, gv, d, p) in X) == max(0, std_p - pinned_p))
 
-    apply_core_double_period_logic(model, X, classes, days, class_subjects, subject_periods, pinned_dict, objective_terms)
+    apply_core_double_period_logic(model, X, classes, days, class_subjects, subject_periods, pinned_dict, objective_terms, rules)
 
     r2_set = set(r2_vars)
     r2_bonus = []
@@ -602,52 +552,42 @@ def run_round_3(r2_vars, rules=None):
     diagnosis = []
     
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-        r3_vars = []
-        for (c, mon, gv, d, p), var in X.items():
-            if solver.Value(var) == 1:
-                r3_vars.append((c, mon, gv, d, p))
+        r3_vars = [(c, mon, gv, d, p) for (c, mon, gv, d, p), var in X.items() if solver.Value(var) == 1]
                             
         actual_counts = {c: {(m, g): 0 for m, g in class_subjects.get(c, [])} for c in classes}
-        
         for c in classes:
             for (mon, gv) in class_subjects.get(c, []):
                 actual_counts[c][(mon, gv)] += get_pinned_count(c, mon, gv, pinned_dict)
 
         for (c, mon, gv, d, p) in r3_vars:
-            if (mon, gv) in actual_counts.get(c, {}):
-                actual_counts[c][(mon, gv)] += 1
+            if (mon, gv) in actual_counts.get(c, {}): actual_counts[c][(mon, gv)] += 1
 
         for c in classes:
             for (mon, gv) in class_subjects.get(c, []):
                 target = subject_periods.get((c, mon, gv), 0)
                 actual = actual_counts[c].get((mon, gv), 0)
                 if actual < target:
-                    diagnosis.append(f"❌ KHÔNG THỂ XẾP: Lớp {c} bị thiếu {target - actual} tiết môn {mon} (Mã GV: {gv}). Nguyên nhân: Xung đột với lịch cố định hoặc ép kín buổi sáng.")
+                    diagnosis.append(f"❌ KHÔNG THỂ XẾP: Lớp {c} bị thiếu {target - actual} tiết môn {mon} (Mã GV: {gv}).")
             
             for d in ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"]:
                 for p in [1, 2, 3, 4]:
                     has_p = any((vc == c and vd == d and vp == p) for (vc, vmon, vgv, vd, vp) in r3_vars)
                     has_pinned_p = any((pc == c and pd == d and pp == p) for (pc, pd, pp), _ in pinned_dict.items())
                     if not has_p and not has_pinned_p:
-                        diagnosis.append(f"⚠️ BỎ TRỐNG TIẾT SÁNG: Lớp {c} bị trống tiết {p} vào {d}. Nguyên nhân: Không còn môn nào phù hợp để lấp.")
+                        diagnosis.append(f"⚠️ BỎ TRỐNG TIẾT SÁNG: Lớp {c} bị trống tiết {p} vào {d}.")
                         
                 has_5 = any((vc == c and vd == d and vp == 5) for (vc, vmon, vgv, vd, vp) in r3_vars) or any((pc == c and pd == d and pp == 5) for (pc, pd, pp), _ in pinned_dict.items())
                 has_6 = any((vc == c and vd == d and vp == 6) for (vc, vmon, vgv, vd, vp) in r3_vars) or any((pc == c and pd == d and pp == 6) for (pc, pd, pp), _ in pinned_dict.items())
                 has_7 = any((vc == c and vd == d and vp == 7) for (vc, vmon, vgv, vd, vp) in r3_vars) or any((pc == c and pd == d and pp == 7) for (pc, pd, pp), _ in pinned_dict.items())
                 
                 if has_5 and has_7 and not has_6:
-                    diagnosis.append(f"⚠️ RĂNG LƯỢC BUỔI CHIỀU: Lớp {c} bị trống Tiết 6 vào {d} (Đang học Tiết 5 và 7). Nguyên nhân: AI phải né vi phạm các luật cứng khác.")
+                    diagnosis.append(f"⚠️ RĂNG LƯỢC BUỔI CHIỀU: Lớp {c} bị trống Tiết 6 vào {d} (Đang học Tiết 5 và 7).")
 
         audit_class_list = []
         for c in sorted(classes):
             target_c = sum(subject_periods.get((c, m, g), 0) for m, g in class_subjects.get(c, []))
             actual_c = sum(actual_counts[c].values())
-            audit_class_list.append({
-                "Lớp": c,
-                "Yêu cầu (M1)": target_c,
-                "Đã xếp (M4)": actual_c,
-                "Trạng thái": "✅ Đủ" if actual_c >= target_c else f"❌ Thiếu {target_c - actual_c}"
-            })
+            audit_class_list.append({"Lớp": c, "Yêu cầu (M1)": target_c, "Đã xếp (M4)": actual_c, "Trạng thái": "✅ Đủ" if actual_c >= target_c else f"❌ Thiếu {target_c - actual_c}"})
             
         audit_gv_list = []
         for gv in sorted(teacher_codes):
@@ -656,21 +596,12 @@ def run_round_3(r2_vars, rules=None):
             for _, row in teachers_raw.iterrows():
                 if str(row.get('ma_gv', '')).strip() == gv:
                     ho_ten = str(row.get('ho_ten', '')).strip()
-                    try: 
-                        target_gv = int(row.get('so_tiet_tkb', 0))
-                    except: 
-                        target_gv = sum(subject_periods.get((c, m, gv), 0) for c in classes for m, g in class_subjects.get(c, []) if g == gv)
+                    try: target_gv = int(row.get('so_tiet_tkb', 0))
+                    except: target_gv = sum(subject_periods.get((c, m, gv), 0) for c in classes for m, g in class_subjects.get(c, []) if g == gv)
                     break
                     
             actual_gv = sum(actual_counts[c].get((m, gv), 0) for c in classes for m, g in class_subjects.get(c, []) if g == gv)
-            
-            audit_gv_list.append({
-                "Mã GV": gv,
-                "Họ Tên": ho_ten,
-                "Phân công (M1)": target_gv,
-                "Thực tế TKB (M4)": actual_gv,
-                "Trạng thái": "✅ Đủ" if actual_gv >= target_gv else f"❌ Thiếu {target_gv - actual_gv}"
-            })
+            audit_gv_list.append({"Mã GV": gv, "Họ Tên": ho_ten, "Phân công (M1)": target_gv, "Thực tế TKB (M4)": actual_gv, "Trạng thái": "✅ Đủ" if actual_gv >= target_gv else f"❌ Thiếu {target_gv - actual_gv}"})
             
         df_audit_class = pd.DataFrame(audit_class_list)
         df_audit_gv = pd.DataFrame(audit_gv_list)
@@ -680,8 +611,6 @@ def run_round_3(r2_vars, rules=None):
             def Value(self, val): return val
             
         df_result = generate_df_from_vars(classes, days, periods, pinned_dict, class_subjects, evaluated_X, DummySolver(), days_off)
-        
-        # BƯỚC HOÀN CHỈNH: Cắt bỏ phần số và dấu phân cách đã ghép ở Module 1
         df_result['Giáo viên'] = df_result['Giáo viên'].apply(cleanup_display_name)
         
         return {
