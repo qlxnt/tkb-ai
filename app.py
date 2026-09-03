@@ -51,7 +51,13 @@ def load_rules_from_db():
 def save_rules_to_db_persist(df):
     conn = sqlite3.connect(DB_PATH)
     df_save = df.copy()
-    df_save['Bật/Tắt'] = df_save['Bật/Tắt'].astype(int)
+    
+    # Bổ sung 1: Xóa các dòng rỗng (nếu lỡ bấm thêm dòng mà chưa nhập Mã Nguyên Tắc)
+    df_save = df_save.dropna(subset=['Mã Nguyên Tắc'])
+    
+    # Bổ sung 2: Lấp đầy các ô trống ở cột Bật/Tắt bằng False, sau đó mới ép kiểu
+    df_save['Bật/Tắt'] = df_save['Bật/Tắt'].fillna(False).astype(bool).astype(int)
+    
     df_save.to_sql("rules_config", conn, if_exists="replace", index=False)
     conn.close()
 
