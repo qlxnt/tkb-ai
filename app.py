@@ -4,6 +4,7 @@ import io
 import os
 import sqlite3
 import re
+import itertools
 from dotenv import load_dotenv
 
 from src.modules.m1_teacher.parser import extract_raw_from_excel, process_hybrid_ai
@@ -27,15 +28,15 @@ def save_table_to_db(df: pd.DataFrame, table_name: str):
     df.to_sql(table_name, conn, if_exists="replace", index=False)
     conn.close()
 
-# --- BẢNG NGUYÊN TẮC THỰC TẾ ---
+# --- BẢNG NGUYÊN TẮC CHUẨN HÓA ---
 DEFAULT_RULES = [
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MAX_2_TIET", "Mô tả": "Không xếp 1 môn quá 2 tiết/buổi/lớp (trừ ghép).", "Loại": "Cơ bản"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "NO_CACH_TIET", "Mô tả": "Tránh xếp cách tiết (Tránh 1-3, 2-4, 1-4, 5-7).", "Loại": "Cơ bản"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "TEACHER_PREFS", "Mô tả": "Áp dụng ngày nghỉ cá nhân và nghỉ theo Tổ bộ môn.", "Loại": "Cơ bản"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "BLOCK_MON_CHINH", "Mô tả": "Các môn cốt lõi (Toán, Văn, Anh...) ép xếp liền 2 tiết.", "Loại": "Nâng cao"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MIN_2_TIET_GV", "Mô tả": "Tối ưu lịch GV: Tránh 1 buổi chỉ dạy đúng 1 tiết.", "Loại": "Nâng cao"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "NO_AFTERNOON_GAP", "Mô tả": "Chống thủng lỗ tiết 6 buổi chiều (mô hình 1-0-1).", "Loại": "Nâng cao"},
-    {"Bật/Tắt": True, "Mã Nguyên Tắc": "KIN_B_SANG", "Mô tả": "Ép thuật toán ưu tiên lấp kín toàn bộ buổi sáng.", "Loại": "Nâng cao"}
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MAX_2_TIET", "Mô tả": "Không xếp 1 môn quá 2 tiết/buổi/lớp (trừ ghép).", "Loại": "Bắt buộc"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "NO_CACH_TIET", "Mô tả": "Tránh xếp cách tiết (Tránh 1-3, 2-4, 1-4, 5-7).", "Loại": "Bắt buộc"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "TEACHER_PREFS", "Mô tả": "Áp dụng ngày nghỉ cá nhân và nghỉ theo Tổ bộ môn.", "Loại": "Bắt buộc"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "BLOCK_MON_CHINH", "Mô tả": "Các môn cốt lõi (Toán, Văn, Anh...) ép xếp liền 2 tiết.", "Loại": "Khuyến khích"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "MIN_2_TIET_GV", "Mô tả": "Tối ưu lịch GV: Tránh 1 buổi chỉ dạy đúng 1 tiết.", "Loại": "Khuyến khích"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "NO_AFTERNOON_GAP", "Mô tả": "Chống thủng lỗ tiết 6 buổi chiều (mô hình 1-0-1).", "Loại": "Khuyến khích"},
+    {"Bật/Tắt": True, "Mã Nguyên Tắc": "KIN_B_SANG", "Mô tả": "Ép thuật toán ưu tiên lấp kín toàn bộ buổi sáng.", "Loại": "Khuyến khích"}
 ]
 
 def load_rules_from_db():
@@ -51,13 +52,8 @@ def load_rules_from_db():
 def save_rules_to_db_persist(df):
     conn = sqlite3.connect(DB_PATH)
     df_save = df.copy()
-    
-    # Bổ sung 1: Xóa các dòng rỗng (nếu lỡ bấm thêm dòng mà chưa nhập Mã Nguyên Tắc)
     df_save = df_save.dropna(subset=['Mã Nguyên Tắc'])
-    
-    # Bổ sung 2: Lấp đầy các ô trống ở cột Bật/Tắt bằng False, sau đó mới ép kiểu
     df_save['Bật/Tắt'] = df_save['Bật/Tắt'].fillna(False).astype(bool).astype(int)
-    
     df_save.to_sql("rules_config", conn, if_exists="replace", index=False)
     conn.close()
 
@@ -185,7 +181,6 @@ def generate_styled_excel_both_shifts(df_sang, df_chieu, df_raw):
     output = io.BytesIO()
     wb.save(output)
     return output.getvalue()
-
 
 def generate_single_styled_excel(df_pivot, entity_name, entity_type="Lớp"):
     try:
@@ -343,7 +338,6 @@ def styler_func(df):
         return 'background-color: white; color: black;'
     return df.style.map(color_cells) if hasattr(df.style, 'map') else df.style.applymap(color_cells)
 
-# --- HÀM HỖ TRỢ XỬ LÝ DỮ LIỆU TỪ FILE CHỈNH SỬA ---
 def parse_r2_vars_from_df(new_df_r2):
     new_r2_vars = []
     try: teachers_df = load_teachers_from_db()
@@ -372,6 +366,62 @@ def parse_r2_vars_from_df(new_df_r2):
                     new_r2_vars.append((c, "TNHN", str(t_row.get('ho_ten', '')).strip(), d, p))
                     break
     return new_r2_vars
+
+# --- HÀM PHÂN TÍCH VÒNG 4 (Đã sửa lỗi melt & đếm ô trống) ---
+def analyze_round_4(df_tkb):
+    # 1. Tạo khung lưới chuẩn 35 tiết/tuần cho tất cả các lớp có trong TKB
+    classes = df_tkb['Lớp'].dropna().unique()
+    days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"]
+    periods = list(range(1, 8))
+    
+    full_grid = pd.DataFrame(list(itertools.product(classes, days, periods)), columns=['Lớp', 'Ngày', 'Tiết'])
+    
+    # 2. Ghép lịch đã xếp vào khung chuẩn (Left Join). Những ô nào AI chưa xếp sẽ tự động thành NaN (Rỗng)
+    df_full = pd.merge(full_grid, df_tkb, on=['Lớp', 'Ngày', 'Tiết'], how='left')
+    
+    df_full['Giáo viên'] = df_full['Giáo viên'].fillna('')
+    df_full['Giáo viên'] = df_full['Giáo viên'].astype(str).str.strip()
+
+    def is_empty(val):
+        return val in ['nan', '', 'None'] or 'Nghỉ' in val
+
+    def is_excluded(row):
+        val = str(row['Giáo viên'])
+        if is_empty(val): return False
+        val_upper = val.upper()
+        if 'TH_MOS' in val_upper: return True
+        if 'T.ANH NN' in val_upper: return True
+        if 'NHÓM LỰA CHỌN' in val_upper or 'LỚP GHÉP' in val_upper or '⭐' in val_upper: return True
+        if row['Ngày'] == 'Thứ Hai' and row['Tiết'] == 1 and 'TNHN' in val_upper: return True
+        return False
+
+    df_full['Trống'] = df_full['Giáo viên'].apply(is_empty)
+    df_full['Bị_loại_trừ'] = df_full.apply(is_excluded, axis=1)
+    df_full['Hợp_lệ'] = ~df_full['Trống'] & ~df_full['Bị_loại_trừ']
+
+    tiet_hop_le = df_full[df_full['Hợp_lệ']].groupby('Lớp').size().reset_index(name='Tổng tiết thực học')
+    o_trong = df_full[df_full['Trống']].groupby('Lớp').size().reset_index(name='Tổng ô trống khả dụng')
+
+    def extract_teacher(val):
+        val = val.replace('🔴', '').replace('📌', '').replace('🟢', '').strip()
+        if '-' in val: return val.split('-')[-1].strip()
+        return val
+        
+    df_valid = df_full[df_full['Hợp_lệ']].copy()
+    df_valid['Tên GV'] = df_valid['Giáo viên'].apply(extract_teacher)
+    gv_count = df_valid.groupby(['Lớp', 'Tên GV']).size().reset_index(name='Số tiết')
+    
+    gv_dict = {}
+    for _, r in gv_count.iterrows():
+        lop = r['Lớp']
+        if lop not in gv_dict: gv_dict[lop] = []
+        gv_dict[lop].append(f"{r['Tên GV']} ({r['Số tiết']})")
+
+    summary_df = pd.merge(tiet_hop_le, o_trong, on='Lớp', how='outer').fillna(0)
+    summary_df['Tổng ô trống khả dụng'] = summary_df['Tổng ô trống khả dụng'].astype(int)
+    summary_df['Phân bổ GV (Số tiết)'] = summary_df['Lớp'].map(lambda x: ", ".join(gv_dict.get(x, [])))
+    
+    return summary_df
 
 
 if menu == "Module 1: Giáo viên":
@@ -439,7 +489,7 @@ elif menu == "Module 3: Kiểm tra Lịch":
     st.markdown('<div class="main-title">🔍 MODULE 3: KIỂM TRA LỊCH CỐ ĐỊNH & NGUYÊN TẮC</div>', unsafe_allow_html=True)
     
     with st.expander("⚙️ BẢNG CẤU HÌNH NGUYÊN TẮC RÀNG BUỘC (RULES ENGINE)", expanded=True):
-        st.info("💡 Hệ thống AI và Module kiểm tra sẽ quét tuân thủ theo các cài đặt trong bảng này. Bấm LƯU để áp dụng thiết lập mới.")
+        st.info("💡 Bật/Tắt và phân loại luật để hệ thống AI tự động tuân thủ. Bấm LƯU sau khi chỉnh sửa.")
         if "rules_df" not in st.session_state:
             st.session_state.rules_df = load_rules_from_db()
             
@@ -451,18 +501,40 @@ elif menu == "Module 3: Kiểm tra Lịch":
             st.success("Đã lưu bảng nguyên tắc vào hệ thống Database!")
             st.rerun()
             
-        active_rules = {row['Mã Nguyên Tắc']: row['Bật/Tắt'] for _, row in edited_rules.iterrows()}
+        active_rules = {
+            row['Mã Nguyên Tắc']: {
+                "Bật/Tắt": row['Bật/Tắt'], 
+                "Loại": row.get('Loại', 'Cơ bản')
+            } 
+            for _, row in edited_rules.iterrows()
+        }
 
     with st.spinner("Đang tổng hợp ma trận và kiểm tra nguyên tắc..."):
         res1 = get_fixed_schedule(active_rules)
         if res1["status"] == "SUCCESS":
+            
             if res1.get("warnings"):
-                st.markdown("#### ⚠️ PHÁT HIỆN LỖI XUNG ĐỘT TRONG LỊCH CỐ ĐỊNH:")
-                for w in res1["warnings"]:
-                    st.warning(w)
+                strict_errors = [w for w in res1["warnings"] if "⛔" in w]
+                soft_warnings = [w for w in res1["warnings"] if "⚠️" in w]
+                
+                if strict_errors:
+                    st.error("#### ⛔ PHÁT HIỆN LỖI LỊCH CỐ ĐỊNH VI PHẠM LUẬT BẮT BUỘC:")
+                    for w in strict_errors:
+                        st.write(w)
+                    st.info('''
+                    **💡 BẠN CÓ 3 LỰA CHỌN ĐỂ XỬ LÝ TRƯỚC KHI CHẠY AI:**
+                    1. **Tuân thủ luật (Sửa lịch):** Quay lại *Module 2: Lớp & CSVC*, tìm và sửa/xóa các tiết cố định đang gây lỗi ở trên.
+                    2. **Phá luật (Ép xếp):** Ở Bảng Nguyên Tắc bên trên, hãy đổi cột `Loại` của luật tương ứng từ `Bắt buộc` sang `Khuyến khích`, rồi bấm **LƯU BẢNG NGUYÊN TẮC**.
+                    3. **Mặc kệ và dùng ứng dụng:** Bạn vẫn có thể sang Module 4 để ép AI chạy thử, nhưng hệ thống 99% sẽ báo lỗi "Infeasible" (Bế tắc) do xung đột dữ liệu cứng.
+                    ''')
+                
+                if soft_warnings:
+                    st.warning("#### ⚠️ CẢNH BÁO VI PHẠM LUẬT KHUYẾN KHÍCH:")
+                    for w in soft_warnings:
+                        st.write(w)
             
             if "message" in res1 and res1["message"]:
-                st.info(res1["message"])
+                st.success(res1["message"])
                 
             df_tkb = res1["data"]
             df_tkb['Ngày'] = pd.Categorical(df_tkb['Ngày'], categories=["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"], ordered=True)
@@ -490,7 +562,13 @@ elif menu == "Module 3: Kiểm tra Lịch":
 elif menu == "Module 4: AI Lấp Đầy":
     st.markdown('<div class="main-title">🧠 MODULE 4: AI LẤP ĐẦY THỜI KHÓA BIỂU</div>', unsafe_allow_html=True)
     
-    active_rules = {row['Mã Nguyên Tắc']: row['Bật/Tắt'] for _, row in load_rules_from_db().iterrows()}
+    active_rules = {
+        row['Mã Nguyên Tắc']: {
+            "Bật/Tắt": row['Bật/Tắt'], 
+            "Loại": row.get('Loại', 'Cơ bản')
+        } 
+        for _, row in load_rules_from_db().iterrows()
+    }
 
     st.markdown("### 📌 VÒNG 1: KHỞI TẠO KHUNG CỐ ĐỊNH")
     if st.button("🚀 CHẠY VÒNG 1: KHỞI TẠO KHUNG CỐ ĐỊNH", type="primary", use_container_width=True):
@@ -567,7 +645,7 @@ elif menu == "Module 4: AI Lấp Đầy":
             st.success("✅ Đã lưu ma trận chỉnh sửa thành công! Bạn có thể kéo xuống bấm CHẠY VÒNG 3 để kiểm tra lỗi.")
 
         st.markdown("---")
-        st.info("💡 CÁCH 2: Tải file Excel ở nút bên dưới về. Chỉnh sửa tùy ý trên máy tính (bằng phần mềm Excel), sau đó upload ngược file vừa sửa vào ô bên cạnh để hệ thống đồng bộ!")
+        st.info("💡 CÁCH 2: Tải file Excel ở nút bên dưới về. Chỉnh sửa tùy ý trên máy tính, sau đó upload ngược file vừa sửa vào ô bên cạnh để hệ thống đồng bộ!")
         
         col_down, col_up = st.columns([1, 1])
         with col_down:
@@ -584,7 +662,7 @@ elif menu == "Module 4: AI Lấp Đầy":
         with col_up:
             uploaded_tkb = st.file_uploader("📤 BƯỚC 2: NẠP LẠI FILE EXCEL ĐÃ SỬA TAY", type=["xlsx"], label_visibility="collapsed")
             if uploaded_tkb is not None:
-                if st.button("🔄 Cập nhật dữ liệu từ file Excel (Đã sửa)", type="primary", use_container_width=True):
+                if st.button("🔄 Cập nhật dữ liệu từ file Excel", type="primary", use_container_width=True):
                     try:
                         xls = pd.ExcelFile(uploaded_tkb)
                         all_rows = []
@@ -605,10 +683,10 @@ elif menu == "Module 4: AI Lấp Đầy":
                             new_df_r2 = pd.DataFrame(all_rows)
                             st.session_state.tkb_round2 = new_df_r2
                             st.session_state.r2_vars = parse_r2_vars_from_df(new_df_r2)
-                            st.success("✅ Đã cập nhật ma trận từ file Excel thành công! Vui lòng bấm CHẠY VÒNG 3 ở bên dưới để kiểm tra lỗi và xuất bản.")
+                            st.success("✅ Đã cập nhật ma trận từ file Excel thành công! Vui lòng bấm CHẠY VÒNG 3 để kiểm tra.")
                             st.rerun()
                         else:
-                            st.error("❌ Không tìm thấy dữ liệu hợp lệ. Đảm bảo file giữ nguyên sheet 'TKB Sáng' và 'TKB Chiều'.")
+                            st.error("❌ Không tìm thấy dữ liệu hợp lệ.")
                     except Exception as e:
                         st.error(f"❌ Lỗi đọc file Excel: {e}")
 
@@ -708,3 +786,13 @@ elif menu == "Module 4: AI Lấp Đầy":
             type="primary",
             use_container_width=True
         )
+
+        # =========================================================
+        # THÊM MỚI: VÒNG 4 - PHÂN TÍCH TỔNG HỢP SAU XẾP LỊCH
+        # =========================================================
+        st.markdown("---")
+        st.markdown("### 📊 VÒNG 4: PHÂN TÍCH TỔNG HỢP & BÓC TÁCH DỮ LIỆU")
+        st.info("💡 Bảng phân tích sức tải của học sinh. Đã tự động loại trừ các môn Nhóm Lựa chọn, TH_MOS, Tiếng Anh NN và TNHN tiết 1 Sáng Thứ Hai để tính toán đúng số **Ô TRỐNG KHẢ DỤNG** còn lại của mỗi lớp.")
+        
+        df_round4 = analyze_round_4(df_tkb)
+        st.dataframe(df_round4, use_container_width=True, height=600)
