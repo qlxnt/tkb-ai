@@ -12,7 +12,7 @@ from src.modules.m1_teacher.database import save_teachers_to_db, load_teachers_f
 from src.modules.m2_facility.parser import extract_lc_cd_matrix, extract_all_pinned_from_excel, extract_assignments_matrix
 from src.modules.m2_facility.database import init_facility_db, seed_default_pinned_slots, load_table
 from src.modules.m3_validator.checker import get_fixed_schedule
-from src.modules.m4_engine.solver import run_round_1, run_round_2, run_round_3
+from src.modules.m4_engine.solver import run_round_1, run_round_2, run_round_3, process_uploaded_final_tkb
 
 load_dotenv(override=True)
 st.set_page_config(page_title="TKB-AI 1.0", page_icon="🏫", layout="wide")
@@ -367,16 +367,14 @@ def parse_r2_vars_from_df(new_df_r2):
                     break
     return new_r2_vars
 
-# --- HÀM PHÂN TÍCH VÒNG 4 (Đã sửa lỗi melt & đếm ô trống) ---
+# --- HÀM PHÂN TÍCH VÒNG 4 ---
 def analyze_round_4(df_tkb):
-    # 1. Tạo khung lưới chuẩn 35 tiết/tuần cho tất cả các lớp có trong TKB
     classes = df_tkb['Lớp'].dropna().unique()
     days = ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"]
     periods = list(range(1, 8))
     
     full_grid = pd.DataFrame(list(itertools.product(classes, days, periods)), columns=['Lớp', 'Ngày', 'Tiết'])
     
-    # 2. Ghép lịch đã xếp vào khung chuẩn (Left Join). Những ô nào AI chưa xếp sẽ tự động thành NaN (Rỗng)
     df_full = pd.merge(full_grid, df_tkb, on=['Lớp', 'Ngày', 'Tiết'], how='left')
     
     df_full['Giáo viên'] = df_full['Giáo viên'].fillna('')
@@ -692,6 +690,22 @@ elif menu == "Module 4: AI Lấp Đầy":
 
         st.markdown("---")
         st.markdown("### 🏆 VÒNG 3: KIỂM TRA ĐỦ TIẾT & CHỐNG ĐÂM ĐỤNG")
+
+        # TÍNH NĂNG MỚI: TẢI FILE EXCEL NGOÀI LUỒNG
+        st.info("💡 Nếu bạn đã có sẵn file TKB Hoàn chỉnh (từ nguồn khác hoặc đã sửa tay) và chỉ muốn xem báo cáo Phân tích Vòng 4, hãy tải lên tại đây:")
+        uploaded_final_tkb = st.file_uploader("📤 NẠP FILE TKB HOÀN CHỈNH ĐỂ CHẠY KIỂM TOÁN VÒNG 4", type=["xlsx"])
+        if uploaded_final_tkb is not None:
+            if st.button("🔄 Xử lý File TKB & Vào thẳng Vòng 4", type="secondary", use_container_width=True):
+                with st.spinner("Đang đọc và phân tích file TKB..."):
+                    res_upload = process_uploaded_final_tkb(uploaded_final_tkb)
+                    if res_upload.get("status") == "SUCCESS":
+                        st.session_state.final_tkb = res_upload["data"]
+                        st.session_state.diagnosis = res_upload["diagnosis"]
+                        st.session_state.audit_class = res_upload.get("audit_class", None)
+                        st.session_state.audit_gv = res_upload.get("audit_gv", None)
+                        st.success("✅ Đã nạp thành công file TKB. Hãy cuộn xuống để xem kết quả Vòng 4!")
+                    else:
+                        st.error(res_upload.get("message", "Lỗi đọc file TKB upload."))
 
         if st.button("🚀 CHẠY VÒNG 3: HOÀN THIỆN TOÀN DIỆN", type="primary", use_container_width=True):
             with st.spinner("Đang chạy kiểm toán chéo Lớp học và Giáo viên... (Có thể mất đến 30 giây)..."):

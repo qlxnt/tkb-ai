@@ -354,19 +354,15 @@ def apply_morning_session_absolute_fill(model, X, classes, days, class_subjects,
                     model.Add(sum(c_vars) + c_pinned + slack_m == 1)
                     objective_terms.append(slack_m * -100000)
 
-# =========================================================
-# THÊM MỚI: VECTOR TRẠNG THÁI & ÉP DỒN TIẾT BUỔI CHIỀU
-# =========================================================
 def apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pinned_dict, objective_terms, rules):
     active_gap, strict_gap = parse_rule(rules, "NO_AFTERNOON_GAP", False)
     if not active_gap: return
     
-    # Khuôn mẫu các Vector hợp lệ (Cấm thủng lỗ, cấm học 1 tiết đơn)
     allowed_vectors = [
-        (0, 0, 0), # Nghỉ trọn buổi chiều
-        (1, 1, 0), # Học tiết 5, 6. Nghỉ tiết 7
-        (0, 1, 1), # Nghỉ tiết 5. Học tiết 6, 7
-        (1, 1, 1)  # Học full 3 tiết
+        (0, 0, 0),
+        (1, 1, 0),
+        (0, 1, 1),
+        (1, 1, 1) 
     ]
     
     for c in classes:
@@ -377,22 +373,18 @@ def apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pin
                 c_vars = [X[(c, mon, gv, d, p)] for (mon, gv) in class_subjects.get(c, []) if (c, mon, gv, d, p) in X]
                 c_pinned = 1 if (c, d, p) in pinned_dict else 0
                 
-                # Tạo biến Integer 0-1 để tương thích với AddAllowedAssignments
                 y = model.NewIntVar(0, 1, f'y_aft_{c}_{d}_{p}')
                 model.Add(y == sum(c_vars) + c_pinned)
                 y_vars.append(y)
                 y_dict[p] = y
             
             if strict_gap:
-                # Ép cứng: Ép AI chỉ được xếp lịch theo 4 vector chuẩn ở trên
                 model.AddAllowedAssignments(y_vars, allowed_vectors)
             else:
-                # Phạt mềm nếu cấu hình Khuyến khích: Chống răng lược 1-0-1
                 gap_var = model.NewBoolVar(f'gap_aft_{c}_{d}')
                 model.Add(gap_var >= y_dict[5] + y_dict[7] - y_dict[6] - 1)
                 objective_terms.append(gap_var * -50000)
                 
-                # Phạt mềm: Chống đi học lắt nhắt 1 tiết (tổng = 1)
                 sum_y = model.NewIntVar(0, 3, f'sum_y_aft_{c}_{d}')
                 model.Add(sum_y == sum(y_vars))
                 is_iso = model.NewBoolVar(f'iso_aft_{c}_{d}')
@@ -400,7 +392,6 @@ def apply_no_afternoon_gap_priority(model, X, classes, days, class_subjects, pin
                 model.Add(sum_y != 1).OnlyEnforceIf(is_iso.Not())
                 objective_terms.append(is_iso * -50000)
             
-            # Tối thiểu hóa số ngày đi học: Cố gắng dồn trống về Vector (0,0,0)
             is_active_afternoon = model.NewBoolVar(f'active_aft_{c}_{d}')
             model.Add(sum(y_vars) > 0).OnlyEnforceIf(is_active_afternoon)
             model.Add(sum(y_vars) == 0).OnlyEnforceIf(is_active_afternoon.Not())
@@ -435,7 +426,6 @@ def apply_teacher_session_optimization(model, X, days, teacher_subjects, teacher
                     objective_terms.append(b_1 * -2000)
 
 def apply_gvcn_monday_period_2_priority(model, X, classes, class_subjects, gvcn_dict, objective_terms):
-    """Ưu tiên xếp tiết chuyên môn của GVCN vào Tiết 2 Thứ Hai (Ngay sau tiết TNHN)"""
     for c in classes:
         gvcn = gvcn_dict.get(c)
         if not gvcn: continue
@@ -487,10 +477,8 @@ def apply_core_double_period_logic(model, X, classes, days, class_subjects, subj
                     if is_absolute_pair:
                         target_pairs = std_p // 2
                         model.Add(sum(pairs_vars) >= max(0, target_pairs - pinned_pairs))
-                    
                     elif is_hard_1_pair:
                         model.Add(sum(pairs_vars) >= max(0, 1 - pinned_pairs))
-                    
                     elif is_soft and active_block:
                         if strict_block:
                             model.Add(sum(pairs_vars) >= max(0, 1 - pinned_pairs))
@@ -742,3 +730,137 @@ def run_round_3(r2_vars, rules=None):
         }
         
     return {"status": "INFEASIBLE", "message": "Thuật toán bế tắc ở Vòng 3 do xung đột cứng.", "diagnosis": ["⚠️ Không tìm được phương án lấp đầy hoàn chỉnh."]}
+
+# =====================================================================
+# HÀM MỚI: ĐỌC VÀ CHẠY KIỂM TOÁN TRỰC TIẾP TỪ FILE EXCEL UPLOAD (VÒNG 4)
+# =====================================================================
+def process_uploaded_final_tkb(file_buffer):
+    """
+    Đọc file Excel TKB do người dùng tải lên, chuyển đổi định dạng và chạy bộ Audit 
+    để xuất ra Dashboard Vòng 4 mà không can thiệp thuật toán AI.
+    """
+    teachers_raw, pinned_df = load_data()
+    mapping, classes, class_subjects, teacher_subjects, subject_periods = get_valid_pairs_and_mapping(teachers_raw)
+    pinned_dict, classes = build_pinned_dict(pinned_df, classes, teachers_raw)
+    teacher_codes = list(teacher_subjects.keys())
+    
+    # 1. Đọc file Excel từ buffer
+    xls = pd.ExcelFile(file_buffer)
+    all_rows = []
+    for sheet in ["TKB Sáng", "TKB Chiều"]:
+        if sheet in xls.sheet_names:
+            df_sheet = pd.read_excel(xls, sheet_name=sheet)
+            if 'Ngày' in df_sheet.columns:
+                df_sheet['Ngày'] = df_sheet['Ngày'].ffill() 
+                for _, row in df_sheet.iterrows():
+                    d = row['Ngày']
+                    p = row['Tiết']
+                    for col in df_sheet.columns:
+                        if col not in ['Ngày', 'Tiết'] and not str(col).startswith('Unnamed'):
+                            val = str(row[col]).strip()
+                            if val and val != 'nan':
+                                all_rows.append({"Lớp": col, "Giáo viên": val, "Ngày": d, "Tiết": p})
+                                
+    df_result = pd.DataFrame(all_rows)
+    if df_result.empty:
+        return {"status": "ERROR", "message": "File tải lên không có dữ liệu hợp lệ."}
+    
+    # Chuẩn hóa thứ tự để hiển thị
+    df_result['Tiết_Sort'] = df_result['Tiết'].astype(int)
+    df_result['Ngày_Sort'] = df_result['Ngày'].map({"Thứ Hai":1, "Thứ Ba":2, "Thứ Tư":3, "Thứ Năm":4, "Thứ Sáu":5})
+    df_result = df_result.sort_values(by=['Lớp', 'Ngày_Sort', 'Tiết_Sort']).drop(columns=['Ngày_Sort', 'Tiết_Sort'])
+    df_result['Giáo viên'] = df_result['Giáo viên'].apply(cleanup_display_name)
+    
+    # 2. Bóc tách lại bộ biến r3_vars để đếm tiết
+    r3_vars = []
+    for _, r in df_result.iterrows():
+        c = str(r.get('Lớp', '')).strip()
+        gv_str = str(r.get('Giáo viên', '')).strip()
+        d = str(r.get('Ngày', '')).strip()
+        try: p = int(r.get('Tiết', 0))
+        except: continue
+        
+        if not c or not d or p == 0: continue
+        # Bỏ qua Nhóm Lựa chọn & Ngoại vi khi đếm tiết
+        if any(x in gv_str for x in ['⭐', '🟢']): continue
+        
+        clean_gv_str = gv_str.replace('🔴', '').replace('📌', '').strip()
+        
+        if '-' in clean_gv_str:
+            parts = clean_gv_str.split('-', 1)
+            mon = parts[0].strip()
+            gv_ho_ten = parts[1].strip()
+            r3_vars.append((c, mon, gv_ho_ten, d, p))
+        elif clean_gv_str == "TNHN":
+            for _, t_row in teachers_raw.iterrows():
+                if str(t_row.get('lop_chu_nhiem', '')).strip() == c:
+                    r3_vars.append((c, "TNHN", str(t_row.get('ho_ten', '')).strip(), d, p))
+                    break
+
+    # 3. Chạy Kiểm Toán (Audit) y hệt Vòng 3
+    diagnosis = []
+    actual_counts = {c: {(m, g): 0 for m, g in class_subjects.get(c, [])} for c in classes}
+    
+    # Đếm số tiết đã ghim cứng ban đầu
+    for c in classes:
+        for (mon, gv) in class_subjects.get(c, []):
+            actual_counts[c][(mon, gv)] += get_pinned_count(c, mon, gv, pinned_dict)
+
+    # Đếm số tiết xếp thêm từ file Upload
+    for (c, mon, gv, d, p) in r3_vars:
+        if (mon, gv) in actual_counts.get(c, {}): actual_counts[c][(mon, gv)] += 1
+
+    for c in classes:
+        # Chẩn đoán thiếu tiết
+        for (mon, gv) in class_subjects.get(c, []):
+            target = subject_periods.get((c, mon, gv), 0)
+            actual = actual_counts[c].get((mon, gv), 0)
+            if actual < target:
+                diagnosis.append(f"❌ KHÔNG THỂ XẾP: Lớp {c} bị thiếu {target - actual} tiết môn {mon} (Mã GV: {gv}).")
+        
+        # Chẩn đoán thủng lỗ răng lược
+        for d in ["Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu"]:
+            for p in [1, 2, 3, 4]:
+                has_p = any((vc == c and vd == d and vp == p) for (vc, vmon, vgv, vd, vp) in r3_vars)
+                has_pinned_p = any((pc == c and pd == d and pp == p) for (pc, pd, pp), _ in pinned_dict.items())
+                if not has_p and not has_pinned_p:
+                    diagnosis.append(f"⚠️ BỎ TRỐNG TIẾT SÁNG: Lớp {c} bị trống tiết {p} vào {d}.")
+                    
+            has_5 = any((vc == c and vd == d and vp == 5) for (vc, vmon, vgv, vd, vp) in r3_vars) or any((pc == c and pd == d and pp == 5) for (pc, pd, pp), _ in pinned_dict.items())
+            has_6 = any((vc == c and vd == d and vp == 6) for (vc, vmon, vgv, vd, vp) in r3_vars) or any((pc == c and pd == d and pp == 6) for (pc, pd, pp), _ in pinned_dict.items())
+            has_7 = any((vc == c and vd == d and vp == 7) for (vc, vmon, vgv, vd, vp) in r3_vars) or any((pc == c and pd == d and pp == 7) for (pc, pd, pp), _ in pinned_dict.items())
+            
+            if has_5 and has_7 and not has_6:
+                diagnosis.append(f"⚠️ RĂNG LƯỢC BUỔI CHIỀU: Lớp {c} bị trống Tiết 6 vào {d} (Đang học Tiết 5 và 7).")
+
+    # Sinh bảng thống kê
+    audit_class_list = []
+    for c in sorted(classes):
+        target_c = sum(subject_periods.get((c, m, g), 0) for m, g in class_subjects.get(c, []))
+        actual_c = sum(actual_counts[c].values())
+        audit_class_list.append({"Lớp": c, "Yêu cầu (M1)": target_c, "Đã xếp (M4)": actual_c, "Trạng thái": "✅ Đủ" if actual_c >= target_c else f"❌ Thiếu {target_c - actual_c}"})
+        
+    audit_gv_list = []
+    for gv in sorted(teacher_codes):
+        ho_ten = gv
+        target_gv = 0
+        for _, row in teachers_raw.iterrows():
+            if str(row.get('ma_gv', '')).strip() == gv:
+                ho_ten = str(row.get('ho_ten', '')).strip()
+                try: target_gv = int(row.get('so_tiet_tkb', 0))
+                except: target_gv = sum(subject_periods.get((c, m, gv), 0) for c in classes for m, g in class_subjects.get(c, []) if g == gv)
+                break
+                
+        actual_gv = sum(actual_counts[c].get((m, gv), 0) for c in classes for m, g in class_subjects.get(c, []) if g == gv)
+        audit_gv_list.append({"Mã GV": gv, "Họ Tên": ho_ten, "Phân công (M1)": target_gv, "Thực tế TKB (M4)": actual_gv, "Trạng thái": "✅ Đủ" if actual_gv >= target_gv else f"❌ Thiếu {target_gv - actual_gv}"})
+        
+    df_audit_class = pd.DataFrame(audit_class_list)
+    df_audit_gv = pd.DataFrame(audit_gv_list)
+
+    return {
+        "status": "SUCCESS", 
+        "data": df_result, 
+        "diagnosis": list(set(diagnosis)),
+        "audit_class": df_audit_class,
+        "audit_gv": df_audit_gv
+    }
